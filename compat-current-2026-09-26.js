@@ -9,6 +9,7 @@
   const CLEAR_BLUR = 'yk-ai-current-clear-blur';
   const CLEAR_USER_SHELL = 'yk-ai-current-clear-user-shell';
   const MENU_PANEL = 'yk-ai-current-menu-panel';
+  const CLEAR_TOP = 'yk-ai-current-clear-top';
   const SITE = location.hostname === 'chatgpt.com' ? 'chatgpt' :
     location.hostname === 'gemini.google.com' ? 'gemini' : '';
 
@@ -102,6 +103,22 @@
         filter: none !important;
         backdrop-filter: blur(10px) !important;
         -webkit-backdrop-filter: blur(10px) !important;
+      }
+
+      /* ChatGPT上端の半透明ヘッダーは背景を見せつつ、ぼかしだけ解除 */
+      html.yk-ai-bg-on.yk-ai-site-chatgpt .${CLEAR_TOP} {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        filter: none !important;
+        background-image: none !important;
+      }
+
+      html.yk-ai-bg-on.yk-ai-site-chatgpt .${CLEAR_TOP}::before,
+      html.yk-ai-bg-on.yk-ai-site-chatgpt .${CLEAR_TOP}::after {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        filter: none !important;
+        background-image: none !important;
       }
 
       /* ---------- ChatGPT 2026-09-26 ---------- */
@@ -229,9 +246,9 @@
   function clearCurrentClasses() {
     document.querySelectorAll(
       '.' + A + ',.' + U + ',.' + SHELL + ',.' +
-      CLEAR_BLUR + ',.' + CLEAR_USER_SHELL + ',.' + MENU_PANEL
+      CLEAR_BLUR + ',.' + CLEAR_USER_SHELL + ',.' + MENU_PANEL + ',.' + CLEAR_TOP
     ).forEach((el) => {
-      el.classList.remove(A, U, SHELL, CLEAR_BLUR, CLEAR_USER_SHELL, MENU_PANEL);
+      el.classList.remove(A, U, SHELL, CLEAR_BLUR, CLEAR_USER_SHELL, MENU_PANEL, CLEAR_TOP);
     });
   }
 
@@ -255,6 +272,52 @@
       return ar.width * ar.height - br.width * br.height;
     });
     return list[0];
+  }
+
+  function clearChatGptTopBlur() {
+    if (SITE !== 'chatgpt') return;
+
+    const candidates = new Set();
+
+    document.querySelectorAll(
+      'header, [class*="header"], [class*="sticky"], [class*="top-"], [class*="backdrop"]'
+    ).forEach((element) => candidates.add(element));
+
+    [
+      [innerWidth * .15, 12],
+      [innerWidth * .50, 12],
+      [innerWidth * .85, 12],
+      [innerWidth * .50, 70]
+    ].forEach(([x, y]) => {
+      let current = document.elementFromPoint(x, Math.min(y, innerHeight - 1));
+      for (let depth = 0;
+        current && current !== document.body && current !== document.documentElement && depth < 6;
+        depth += 1) {
+        candidates.add(current);
+        current = current.parentElement;
+      }
+    });
+
+    candidates.forEach((element) => {
+      if (!(element instanceof HTMLElement)) return;
+      if (element.closest('[role="dialog"],[role="menu"],aside,nav')) return;
+
+      const rect = element.getBoundingClientRect();
+      const nearTop = rect.top <= 120 && rect.bottom >= 0;
+      const broad = rect.width >= innerWidth * .55;
+      const headerHeight = rect.height >= 34 && rect.height <= 150;
+
+      if (!nearTop || !broad || !headerHeight) return;
+
+      const style = getComputedStyle(element);
+      const fx = [
+        style.backdropFilter || '',
+        style.webkitBackdropFilter || '',
+        style.filter || ''
+      ].join(' ').toLowerCase();
+
+      if (fx.includes('blur(')) element.classList.add(CLEAR_TOP);
+    });
   }
 
   function markChatGPT() {
@@ -489,8 +552,12 @@
     addStyle();
     clearCurrentClasses();
 
-    if (SITE === 'chatgpt') markChatGPT();
-    else markGemini();
+    if (SITE === 'chatgpt') {
+      markChatGPT();
+      clearChatGptTopBlur();
+    } else {
+      markGemini();
+    }
 
     markOpenMenus();
   }
