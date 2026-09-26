@@ -6,6 +6,9 @@
   const A = 'yk-ai-current-assistant';
   const U = 'yk-ai-current-user';
   const SHELL = 'yk-ai-current-shell';
+  const CLEAR_BLUR = 'yk-ai-current-clear-blur';
+  const CLEAR_USER_SHELL = 'yk-ai-current-clear-user-shell';
+  const MENU_PANEL = 'yk-ai-current-menu-panel';
   const SITE = location.hostname === 'chatgpt.com' ? 'chatgpt' :
     location.hostname === 'gemini.google.com' ? 'gemini' : '';
 
@@ -73,6 +76,32 @@
       html.yk-ai-bg-on .${A} > *,
       html.yk-ai-bg-on .${U} > * {
         background-color: transparent !important;
+      }
+
+      /* Geminiの新UIで会話全体に付くblur面だけを解除 */
+      html.yk-ai-bg-on.yk-ai-site-gemini .${CLEAR_BLUR},
+      html.yk-ai-bg-on.yk-ai-site-gemini .${CLEAR_USER_SHELL} {
+        background: transparent !important;
+        background-color: transparent !important;
+        background-image: none !important;
+        border-color: transparent !important;
+        box-shadow: none !important;
+        filter: none !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+      }
+
+      /* DOM名が変わってもメニュー外殻は読める濃さを維持 */
+      html.yk-ai-bg-on .${MENU_PANEL} {
+        background: rgba(31,31,34,.97) !important;
+        background-color: rgba(31,31,34,.97) !important;
+        background-image: none !important;
+        border: 1px solid rgba(255,255,255,.08) !important;
+        border-radius: 16px !important;
+        box-shadow: 0 12px 34px rgba(0,0,0,.42) !important;
+        filter: none !important;
+        backdrop-filter: blur(10px) !important;
+        -webkit-backdrop-filter: blur(10px) !important;
       }
 
       /* ---------- ChatGPT 2026-09-26 ---------- */
@@ -198,8 +227,11 @@
   }
 
   function clearCurrentClasses() {
-    document.querySelectorAll('.' + A + ',.' + U + ',.' + SHELL).forEach((el) => {
-      el.classList.remove(A, U, SHELL);
+    document.querySelectorAll(
+      '.' + A + ',.' + U + ',.' + SHELL + ',.' +
+      CLEAR_BLUR + ',.' + CLEAR_USER_SHELL + ',.' + MENU_PANEL
+    ).forEach((el) => {
+      el.classList.remove(A, U, SHELL, CLEAR_BLUR, CLEAR_USER_SHELL, MENU_PANEL);
     });
   }
 
@@ -260,6 +292,145 @@
     if (composer) markOuterShell(composer, '[data-composer-surface="true"]');
   }
 
+  function hasRealBlur(element) {
+    if (!(element instanceof HTMLElement)) return false;
+    const style = getComputedStyle(element);
+    const value = [
+      style.backdropFilter || '',
+      style.webkitBackdropFilter || '',
+      style.filter || ''
+    ].join(' ').toLowerCase();
+
+    if (!value.includes('blur(')) return false;
+    return !/blur\(\s*0(?:px|rem|em)?\s*\)/.test(value);
+  }
+
+  function isOverlayLike(element) {
+    if (!(element instanceof Element)) return true;
+    return Boolean(
+      element.closest(
+        '[role="menu"],[role="dialog"],dialog,.cdk-overlay-container,' +
+        '.cdk-overlay-pane,[data-radix-popper-content-wrapper],' +
+        'rich-textarea,input-area,input-area-v2,header,nav,aside'
+      )
+    );
+  }
+
+  function clearGeminiConversationBlur() {
+    if (SITE !== 'gemini') return;
+
+    const candidates = new Set();
+
+    document.querySelectorAll(
+      'model-response,user-query,main,chat-window,conversation-container,infinite-scroller'
+    ).forEach((anchor) => {
+      let current = anchor;
+      for (let depth = 0;
+        current && current !== document.body && current !== document.documentElement && depth < 9;
+        depth += 1) {
+        candidates.add(current);
+        current = current.parentElement;
+      }
+    });
+
+    [
+      [innerWidth * .5, innerHeight * .38],
+      [innerWidth * .25, innerHeight * .52],
+      [innerWidth * .75, innerHeight * .52]
+    ].forEach(([x, y]) => {
+      let current = document.elementFromPoint(x, y);
+      for (let depth = 0;
+        current && current !== document.body && current !== document.documentElement && depth < 8;
+        depth += 1) {
+        candidates.add(current);
+        current = current.parentElement;
+      }
+    });
+
+    candidates.forEach((element) => {
+      if (!(element instanceof HTMLElement) || isOverlayLike(element)) return;
+      if (!hasRealBlur(element)) return;
+
+      const rect = element.getBoundingClientRect();
+      const broad = rect.width >= innerWidth * .68;
+      const tall = rect.height >= innerHeight * .25;
+      const central = rect.top < innerHeight * .82 && rect.bottom > innerHeight * .20;
+
+      if (broad && tall && central) element.classList.add(CLEAR_BLUR);
+    });
+  }
+
+  function isDarkBackground(element) {
+    if (!(element instanceof HTMLElement)) return false;
+    const color = String(getComputedStyle(element).backgroundColor || '');
+    const values = color.match(/[\d.]+/g);
+    if (!values || values.length < 3) return false;
+
+    const r = Number(values[0]);
+    const g = Number(values[1]);
+    const b = Number(values[2]);
+    const a = values.length >= 4 ? Number(values[3]) : 1;
+
+    return a > .28 && r < 72 && g < 72 && b < 78;
+  }
+
+  function clearGeminiUserOuterShell(root, leaf) {
+    if (!(root instanceof Element)) return;
+
+    const candidates = new Set([root]);
+    let current = leaf instanceof Element ? leaf.parentElement : root.firstElementChild;
+
+    for (let depth = 0; current && depth < 6; depth += 1) {
+      candidates.add(current);
+      if (current === root) break;
+      current = current.parentElement;
+    }
+
+    root.querySelectorAll(':scope > *, :scope > * > *').forEach((element) => {
+      candidates.add(element);
+    });
+
+    candidates.forEach((element) => {
+      if (!(element instanceof HTMLElement) || element === leaf) return;
+      if (element.closest('[role="menu"],[role="dialog"],.cdk-overlay-pane')) return;
+
+      const rect = element.getBoundingClientRect();
+      if (rect.width < 42 || rect.height < 34) return;
+      if (rect.width > innerWidth * .72 || rect.height > 240) return;
+
+      const style = getComputedStyle(element);
+      const radius = parseFloat(style.borderTopLeftRadius) || 0;
+
+      if ((radius >= 14 && isDarkBackground(element)) || hasRealBlur(element)) {
+        element.classList.add(CLEAR_USER_SHELL);
+      }
+    });
+  }
+
+  function markOpenMenus() {
+    const menus = document.querySelectorAll(
+      '[role="menu"],[data-radix-menu-content],.mat-mdc-menu-panel,.mat-mdc-menu-content'
+    );
+
+    menus.forEach((menu) => {
+      if (!(menu instanceof HTMLElement) || !visible(menu)) return;
+
+      menu.classList.add(MENU_PANEL);
+
+      let current = menu.parentElement;
+      for (let depth = 0; current && depth < 3; depth += 1) {
+        const style = getComputedStyle(current);
+        const rect = current.getBoundingClientRect();
+        const positioned = style.position === 'fixed' || style.position === 'absolute';
+        if (positioned && rect.width >= menu.getBoundingClientRect().width * .9) {
+          current.classList.add(MENU_PANEL);
+          break;
+        }
+        current = current.parentElement;
+      }
+    });
+  }
+
   function markGemini() {
     document.querySelectorAll('model-response').forEach((root) => {
       const target = smallestVisible(root, [
@@ -277,8 +448,13 @@
         '.query-content',
         '[class*="query-content"]'
       ]);
-      if (target) target.classList.add(U);
+      if (target) {
+        target.classList.add(U);
+        clearGeminiUserOuterShell(root, target);
+      }
     });
+
+    clearGeminiConversationBlur();
 
     const composer = document.querySelector(
       'rich-textarea [contenteditable="true"], div.ql-editor, [aria-label="Enter a prompt here"], [contenteditable="true"][role="textbox"]'
@@ -315,6 +491,8 @@
 
     if (SITE === 'chatgpt') markChatGPT();
     else markGemini();
+
+    markOpenMenus();
   }
 
   function schedule(delay = 60) {
